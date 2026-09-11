@@ -15,7 +15,7 @@ const day = (value: Date | string) => {
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
   return `${get("year")}-${get("month")}-${get("day")}`;
 };
-const inputDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+const inputDate = (date: Date) => day(date);
 
 function stats(invoices: Invoice[]) {
   const valid = invoices.filter((i) => i.status === "completed");
