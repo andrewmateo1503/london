@@ -1,13 +1,21 @@
-import { env } from "cloudflare:workers";
-import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./schema";
 
 export function getDb() {
-  if (!env.DB) {
-    throw new Error(
-      "Cloudflare D1 binding `DB` is unavailable. Set the `d1` field in .openai/hosting.json to `DB` or let your control plane inject the real binding values before using the database."
-    );
+  // If running in a Cloudflare environment, dynamically acquire D1 database:
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { env } = require("cloudflare:workers");
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { drizzle } = require("drizzle-orm/d1");
+    if (env?.DB) {
+      return drizzle(env.DB, { schema });
+    }
+  } catch {
+    // Cloudflare runtime bindings not present (e.g. Vercel or local Node)
   }
 
-  return drizzle(env.DB, { schema });
+  throw new Error(
+    "Cloudflare D1 database is not configured or unavailable in this environment."
+  );
 }
+
