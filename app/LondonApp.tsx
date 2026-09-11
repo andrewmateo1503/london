@@ -64,7 +64,7 @@ function Empty({ title, text }: { title: string; text: string }) {
   return <div className="empty"><b>◇</b><strong>{title}</strong><p>{text}</p></div>;
 }
 
-function Sale({ products, invoices, refresh, notify }: { products: Product[]; invoices: Invoice[]; refresh: () => Promise<void>; notify: (n: Notice) => void }) {
+function Sale({ products, categories, invoices, refresh, notify }: { products: Product[]; categories: Category[]; invoices: Invoice[]; refresh: () => Promise<void>; notify: (n: Notice) => void }) {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [search, setSearch] = useState("");
   const [person, setPerson] = useState("");
@@ -73,20 +73,58 @@ function Sale({ products, invoices, refresh, notify }: { products: Product[]; in
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [requestId, setRequestId] = useState(() => makeId());
+
+  // Quick custom item states
+  const [customName, setCustomName] = useState("");
+  const [customPrice, setCustomPrice] = useState("");
+  const [customCategory, setCustomCategory] = useState("");
+  const [addingCustom, setAddingCustom] = useState(false);
+
   const total = cart.reduce((sum, line) => sum + line.quantity * line.price, 0);
   const paid = payment === "cash" ? Number(received || 0) : total;
   const change = payment === "cash" ? Math.max(0, paid - total) : 0;
   const suggestions = [...new Map(invoices.map((i) => [norm(i.person_name), i.person_name])).values()];
   const visible = products.filter((p) => p.active && norm(p.name).includes(norm(search)));
 
-  function add(product: Product) {
+  function add(product: { id: string; name: string; price: number }) {
     setCart((lines) => lines.some((x) => x.productId === product.id)
       ? lines.map((x) => x.productId === product.id ? { ...x, quantity: x.quantity + 1 } : x)
       : [...lines, { productId: product.id, name: product.name, quantity: 1, price: product.price }]);
   }
+
   function update(id: string, changes: Partial<CartLine>) {
     setCart((lines) => lines.map((x) => x.productId === id ? { ...x, ...changes } : x).filter((x) => x.quantity > 0));
   }
+
+  async function handleAddCustom(e: React.FormEvent) {
+    e.preventDefault();
+    if (!customName.trim()) return notify({ kind: "error", text: "Escribe el nombre del producto." });
+    const priceNum = Number(customPrice);
+    if (isNaN(priceNum) || priceNum < 0) return notify({ kind: "error", text: "Ingresa un precio válido." });
+
+    setAddingCustom(true);
+    try {
+      // Create product persistent in database / catalog
+      const newProdId = makeId();
+      await saveProduct({
+        name: customName.trim(),
+        price: priceNum,
+        category_id: customCategory || null,
+        active: true
+      });
+      await refresh();
+      add({ id: newProdId, name: customName.trim(), price: priceNum });
+      setCustomName("");
+      setCustomPrice("");
+      setCustomCategory("");
+      notify({ kind: "ok", text: `Producto "${customName.trim()}" agregado al catálogo y a la factura.` });
+    } catch (err) {
+      notify({ kind: "error", text: err instanceof Error ? err.message : "Error al guardar el producto." });
+    } finally {
+      setAddingCustom(false);
+    }
+  }
+
   async function save() {
     if (!person.trim()) return notify({ kind: "error", text: "Escribe el nombre de la persona." });
     if (!cart.length) return notify({ kind: "error", text: "Agrega al menos un producto." });
@@ -99,33 +137,62 @@ function Sale({ products, invoices, refresh, notify }: { products: Product[]; in
     } catch (e) { notify({ kind: "error", text: e instanceof Error ? e.message : "No se pudo guardar." }); }
     finally { setSaving(false); }
   }
+
   return <main className="sale-layout">
     <section className="catalog">
       <div className="heading"><div><p>Registro de factura</p><h1>Nueva venta</h1></div><span><small>Ahora</small><b>{localDate.format(new Date())}</b></span></div>
-      <label className="search"><i>⌕</i><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar producto..." />{search && <button onClick={() => setSearch("")}>×</button>}</label>
+      
+      {/* Quick custom product creator */}
+      <form onSubmit={handleAddCustom} style={{ background: "var(--paper)", border: "1px solid var(--line)", borderRadius: "16px", padding: "16px", margin: "20px 0", display: "grid", gap: "10px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <strong style={{ fontSize: "13px" }}>＋ Crear producto rápido</strong>
+          <small style={{ color: "var(--muted)", fontSize: "10px" }}>Se guarda en catálogo y factura</small>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr auto", gap: "8px", alignItems: "end" }}>
+          <label style={{ margin: 0 }}><span style={{ fontSize: "9px", color: "var(--muted)", display: "block", marginBottom: "4px" }}>Nombre del producto</span>
+            <input placeholder="Ej. Mojito, Alitas..." value={customName} onChange={(e) => setCustomName(e.target.value)} style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--line)", width: "100%" }} />
+          </label>
+          <label style={{ margin: 0 }}><span style={{ fontSize: "9px", color: "var(--muted)", display: "block", marginBottom: "4px" }}>Precio ($)</span>
+            <input type="number" step="0.01" placeholder="0.00" value={customPrice} onChange={(e) => setCustomPrice(e.target.value)} style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--line)", width: "100%" }} />
+          </label>
+          <label style={{ margin: 0 }}><span style={{ fontSize: "9px", color: "var(--muted)", display: "block", marginBottom: "4px" }}>Categoría / Tipo</span>
+            <select value={customCategory} onChange={(e) => setCustomCategory(e.target.value)} style={{ height: "38px", padding: "0 8px", borderRadius: "8px", border: "1px solid var(--line)", width: "100%", background: "#fff" }}>
+              <option value="">Sin categoría</option>
+              {categories.map((c) => <option value={c.id} key={c.id}>{c.name}</option>)}
+            </select>
+          </label>
+          <button type="submit" disabled={addingCustom || !customName.trim() || !customPrice.trim()} className="primary" style={{ height: "38px", padding: "0 14px", borderRadius: "8px" }}>
+            {addingCustom ? "..." : "Agregar"}
+          </button>
+        </div>
+      </form>
+
+      <label className="search"><i>⌕</i><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar producto existente..." />{search && <button type="button" onClick={() => setSearch("")}>×</button>}</label>
+      
       <div className="product-grid">{visible.map((product) => {
         const quantity = cart.find((x) => x.productId === product.id)?.quantity;
-        return <button className="product" key={product.id} onClick={() => add(product)}>
+        return <button type="button" className="product" key={product.id} onClick={() => add(product)}>
           <small>{product.category?.name ?? "Producto"}</small><strong>{product.name}</strong><b>{usd.format(product.price)}</b>{quantity ? <em>{quantity}</em> : null}
         </button>;
       })}</div>
-      {!visible.length && <Empty title="Sin resultados" text="Prueba con otro nombre o activa el producto." />}
+      {!visible.length && <Empty title="Sin resultados" text="Usa el formulario de arriba para agregar cualquier producto nuevo." />}
     </section>
+    
     <aside className="invoice">
-      <header><span><small>Factura actual</small><strong>{cart.reduce((s, x) => s + x.quantity, 0)} productos</strong></span>{cart.length > 0 && <button onClick={() => setCart([])}>Vaciar</button>}</header>
+      <header><span><small>Factura actual</small><strong>{cart.reduce((s, x) => s + x.quantity, 0)} productos</strong></span>{cart.length > 0 && <button type="button" onClick={() => setCart([])}>Vaciar</button>}</header>
       <div className="cart">{cart.length ? cart.map((line) => <article key={line.productId}>
-        <div><strong>{line.name}</strong><button onClick={() => setCart((x) => x.filter((i) => i.productId !== line.productId))}>×</button></div>
-        <section><span className="stepper"><button onClick={() => update(line.productId, { quantity: line.quantity - 1 })}>−</button><input value={line.quantity} onChange={(e) => update(line.productId, { quantity: Math.max(1, Number(e.target.value)) })} /><button onClick={() => update(line.productId, { quantity: line.quantity + 1 })}>+</button></span>
+        <div><strong>{line.name}</strong><button type="button" onClick={() => setCart((x) => x.filter((i) => i.productId !== line.productId))}>×</button></div>
+        <section><span className="stepper"><button type="button" onClick={() => update(line.productId, { quantity: line.quantity - 1 })}>−</button><input value={line.quantity} onChange={(e) => update(line.productId, { quantity: Math.max(1, Number(e.target.value)) })} /><button type="button" onClick={() => update(line.productId, { quantity: line.quantity + 1 })}>+</button></span>
           <label className="line-price">$<input value={line.price} onChange={(e) => update(line.productId, { price: Math.max(0, Number(e.target.value)) })} /></label><b>{usd.format(line.quantity * line.price)}</b></section>
-      </article>) : <div className="empty-cart"><b>＋</b><span>Toca un producto para agregarlo</span></div>}</div>
+      </article>) : <div className="empty-cart"><b>＋</b><span>Toca un producto o agrégalo arriba</span></div>}</div>
       <div className="form">
         <label><span>Persona <b>*</b></span><input list="names" value={person} onChange={(e) => setPerson(e.target.value)} placeholder="Escribe el nombre" /><datalist id="names">{suggestions.map((n) => <option value={n} key={n} />)}</datalist></label>
-        <fieldset><legend>Método de pago</legend><div className="payments">{paymentCodes.map((code) => <button key={code} className={payment === code ? "active" : ""} onClick={() => setPayment(code)}>{PAYMENT_LABELS[code]}</button>)}</div></fieldset>
+        <fieldset><legend>Método de pago</legend><div className="payments">{paymentCodes.map((code) => <button type="button" key={code} className={payment === code ? "active" : ""} onClick={() => setPayment(code)}>{PAYMENT_LABELS[code]}</button>)}</div></fieldset>
         {payment === "cash" && <label><span>Dinero recibido <b>*</b></span><div className="money-input">$<input value={received} onChange={(e) => setReceived(e.target.value)} inputMode="decimal" placeholder="0.00" /></div></label>}
         <label><span>Observaciones <small>Opcional</small></span><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Ej. Sin salsas, pedido para llevar..." /></label>
       </div>
       <div className="totals"><p><span>Subtotal</span><b>{usd.format(total)}</b></p><p><span>Recibido</span><b>{usd.format(paid)}</b></p><p className="change"><span>Cambio</span><b>{usd.format(change)}</b></p><p className="grand"><span>Total</span><strong>{usd.format(total)}</strong></p></div>
-      <button className="save" disabled={saving || !cart.length} onClick={save}>{saving ? "Guardando..." : <>Guardar factura <b>→</b></>}</button>
+      <button type="button" className="save" disabled={saving || !cart.length} onClick={save}>{saving ? "Guardando..." : <>Guardar factura <b>→</b></>}</button>
     </aside>
   </main>;
 }
@@ -286,7 +353,7 @@ export default function LondonApp() {
   return <div className="app"><Header view={view} select={setView} />
     {!databaseConfigured && <aside className="demo"><b>Modo demostración</b><span>Al configurar Supabase se usará PostgreSQL.</span><button onClick={() => { resetDemoData(); location.reload(); }}>Restaurar datos demo</button></aside>}
     {notice && <aside className={`notice ${notice.kind}`}><b>{notice.kind === "ok" ? "✓" : "!"}</b><span>{notice.text}</span><button onClick={() => setNotice(null)}>×</button></aside>}
-    {view === "sale" && <Sale products={products} invoices={invoices} refresh={refresh} notify={setNotice} />}
+    {view === "sale" && <Sale products={products} categories={categories} invoices={invoices} refresh={refresh} notify={setNotice} />}
     {view === "summary" && <Summary invoices={invoices} select={setSelected} />}
     {view === "people" && <Personas invoices={invoices} />}
     {view === "history" && <History invoices={invoices} select={setSelected} />}
