@@ -52,7 +52,10 @@ function Header({ view, select }: { view: View; select: (view: View) => void }) 
   ];
   return <>
     <header className="topbar">
-      <button className="brand" onClick={() => select("sale")}><b>L</b><span><strong>London</strong><small>Frozen &amp; Hot</small></span></button>
+      <button className="brand" onClick={() => select("sale")} style={{ gap: "12px" }}>
+        <img src="/logo.jpg" alt="London Frozen & Hot Logo" style={{ width: "42px", height: "42px", borderRadius: "10px", objectFit: "cover", border: "1px solid var(--line)" }} />
+        <span><strong>London</strong><small>Frozen &amp; Hot</small></span>
+      </button>
       <nav>{links.map(([id, label, icon]) => <button key={id} className={view === id ? "active" : ""} onClick={() => select(id)}><i>{icon}</i>{label}</button>)}</nav>
       <span className="country">Ecuador · USD</span>
     </header>
